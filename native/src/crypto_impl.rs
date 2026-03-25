@@ -112,3 +112,28 @@ pub fn compare(a: &str, b: &str) -> bool {
     }
     a_bytes.ct_eq(b_bytes).into()
 }
+
+pub fn hash(algo: &str, data: &str) -> String {
+    match algo {
+        "sha512" => {
+            use sha2::Digest;
+            let mut h = Sha512::new();
+            h.update(data.as_bytes());
+            hex::encode(h.finalize())
+        },
+        _ => {
+            // Default: sha256
+            use sha2::Digest;
+            let mut h = Sha256::new();
+            h.update(data.as_bytes());
+            hex::encode(h.finalize())
+        }
+    }
+}
+
+pub fn random_bytes(size: usize) -> String {
+    use rand::RngCore;
+    let mut bytes = vec![0u8; size];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    general_purpose::STANDARD.encode(&bytes)
+}

@@ -111,98 +111,52 @@ function local_utf8_decode(bytes) {
 // Native bindings are loaded by the runtime into t["@titanpl/core"]
 const natives = t["@titanpl/core"] || {};
 
-console.log("[TitanCore] Available natives:", Object.keys(natives));
-
-
-
-// Native Function bindings
-const native_fs_read_file = natives.fs_read_file;
-const native_fs_write_file = natives.fs_write_file;
-const native_fs_readdir = natives.fs_readdir;
-const native_fs_mkdir = natives.fs_mkdir;
-const native_fs_exists = natives.fs_exists;
-const native_fs_stat = natives.fs_stat;
-const native_fs_remove = natives.fs_remove;
-const native_path_cwd = natives.path_cwd;
-
-const native_crypto_hash = natives.crypto_hash;
-const native_crypto_random_bytes = natives.crypto_random_bytes;
-const native_crypto_uuid = natives.crypto_uuid;
-const native_crypto_encrypt = natives.crypto_encrypt;
-const native_crypto_decrypt = natives.crypto_decrypt;
-const native_crypto_hash_keyed = natives.crypto_hash_keyed;
-const native_crypto_compare = natives.crypto_compare;
-
-const native_os_info = natives.os_info;
-const native_net_resolve = natives.net_resolve;
-const native_net_ip = natives.net_ip;
-const native_proc_info = natives.proc_info;
-const native_time_sleep = natives.time_sleep;
-
-const native_ls_get = natives.ls_get;
-const native_ls_set = natives.ls_set;
-const native_ls_remove = natives.ls_remove;
-const native_ls_clear = natives.ls_clear;
-const native_ls_keys = natives.ls_keys;
-const native_serialize = natives.serialize;
-const native_deserialize = natives.deserialize;
-
-
-
-const native_session_get = natives.session_get;
-const native_session_set = natives.session_set;
-const native_session_delete = natives.session_delete;
-const native_session_clear = natives.session_clear;
-
 // --- FS ---
 /** File System module */
 const fs = {
-    /** Reads file content as UTF-8 string */
-    readFile: (path) => {
-        if (!native_fs_read_file) throw new Error("Native fs_read_file not found");
-        const res = native_fs_read_file(path);
-        if (res && res.startsWith("ERROR:")) throw new Error(res);
+    /** Reads file content as string. Supports options: { encoding: 'utf8' } or encoding name string. */
+    readFile: (path, options) => {
+        const encoding = typeof options === 'string' ? options : (options && options.encoding);
+        const res = natives.fs_read_file(path);
+        if (res && typeof res === 'string' && res.startsWith("ERROR:")) throw new Error(res);
         return res;
     },
     /** Writes content to file */
     writeFile: (path, content) => {
-        if (!native_fs_write_file) throw new Error("Native fs_write_file not found");
-        native_fs_write_file(path, content);
+        const res = natives.fs_write_file(path, content);
+        if (res && typeof res === 'string' && res.startsWith("ERROR:")) throw new Error(res);
     },
     /** Reads directory contents */
     readdir: (path) => {
-        if (!native_fs_readdir) throw new Error("Native fs_readdir not found");
-        const res = native_fs_readdir(path);
+        const res = natives.fs_readdir(path);
         try {
-            return JSON.parse(res);
+            return typeof res === 'string' ? JSON.parse(res) : res;
         } catch (e) {
             return [];
         }
     },
     /** Creates direction recursively */
     mkdir: (path) => {
-        if (!native_fs_mkdir) throw new Error("Native fs_mkdir not found");
-        native_fs_mkdir(path);
+        const res = natives.fs_mkdir(path);
+        if (res && typeof res === 'string' && res.startsWith("ERROR:")) throw new Error(res);
     },
     /** Checks if path exists */
     exists: (path) => {
-        if (!native_fs_exists) throw new Error("Native fs_exists not found");
-        return native_fs_exists(path);
+        return natives.fs_exists(path);
     },
     /** Returns file stats */
     stat: (path) => {
-        if (!native_fs_stat) throw new Error("Native fs_stat not found");
-        const res = native_fs_stat(path);
+        const res = natives.fs_stat(path);
         try {
-            return JSON.parse(res);
+            return typeof res === 'string' ? JSON.parse(res) : res;
         } catch (e) {
             return {};
         }
     },
     /** Removes file or directory */
     remove: (path) => {
-        if (!native_fs_remove) throw new Error("Native fs_remove not found");
-        native_fs_remove(path);
+        const res = natives.fs_remove(path);
+        if (res && typeof res === 'string' && res.startsWith("ERROR:")) throw new Error(res);
     }
 };
 
@@ -227,8 +181,8 @@ const path = {
         }
         if (!resolved.startsWith('/')) {
             const isWindowsAbs = /^[a-zA-Z]:\\/.test(resolved) || resolved.startsWith('\\');
-            if (!isWindowsAbs && native_path_cwd) {
-                const cwd = native_path_cwd();
+            if (!isWindowsAbs && natives.path_cwd) {
+                const cwd = natives.path_cwd();
                 if (cwd) {
                     resolved = path.join(cwd, resolved);
                 }
@@ -251,9 +205,9 @@ const path = {
 // --- Crypto ---
 /** Cryptography module */
 const crypto = {
-    hash: (algo, data) => native_crypto_hash ? native_crypto_hash(algo, data) : "",
-    randomBytes: (size) => native_crypto_random_bytes ? native_crypto_random_bytes(size) : "",
-    uuid: () => native_crypto_uuid ? native_crypto_uuid() : "",
+    hash: (algo, data) => natives.crypto_hash ? natives.crypto_hash(algo, data) : "",
+    randomBytes: (size) => natives.crypto_random_bytes ? natives.crypto_random_bytes(size) : "",
+    uuid: () => natives.crypto_uuid ? natives.crypto_uuid() : "",
     base64: {
         encode: (str) => local_btoa(str),
         decode: (str) => local_atob(str),
@@ -261,28 +215,25 @@ const crypto = {
     // Extended API
     /** Encrypts data using AES-256-GCM. Returns Base64 string. */
     encrypt: (algorithm, key, plaintext) => {
-        if (!native_crypto_encrypt) throw new Error("Native crypto_encrypt not found");
-        const res = native_crypto_encrypt(algorithm, JSON.stringify({ key, plaintext }));
-        if (res.startsWith("ERROR:")) throw new Error(res.substring(6));
+        const res = natives.crypto_encrypt(algorithm, JSON.stringify({ key, plaintext }));
+        if (res && typeof res === 'string' && res.startsWith("ERROR:")) throw new Error(res.substring(6));
         return res;
     },
     /** Decrypts data using AES-256-GCM. Returns plaintext string. */
     decrypt: (algorithm, key, ciphertext) => {
-        if (!native_crypto_decrypt) throw new Error("Native crypto_decrypt not found");
-        const res = native_crypto_decrypt(algorithm, JSON.stringify({ key, ciphertext }));
-        if (res.startsWith("ERROR:")) throw new Error(res.substring(6));
+        const res = natives.crypto_decrypt(algorithm, JSON.stringify({ key, ciphertext }));
+        if (res && typeof res === 'string' && res.startsWith("ERROR:")) throw new Error(res.substring(6));
         return res;
     },
     /** Computes HMAC-SHA256/512. Returns Hex string. */
     hashKeyed: (algorithm, key, message) => {
-        if (!native_crypto_hash_keyed) throw new Error("Native crypto_hash_keyed not found");
-        const res = native_crypto_hash_keyed(algorithm, JSON.stringify({ key, message }));
-        if (res.startsWith("ERROR:")) throw new Error(res.substring(6));
+        const res = natives.crypto_hash_keyed(algorithm, JSON.stringify({ key, message }));
+        if (res && typeof res === 'string' && res.startsWith("ERROR:")) throw new Error(res.substring(6));
         return res;
     },
     /** Constant-time string comparison */
     compare: (a, b) => {
-        if (native_crypto_compare) return native_crypto_compare(a, b);
+        if (natives.crypto_compare) return natives.crypto_compare(a, b);
         // Fallback insecure
         if (a.length !== b.length) return false;
         let mismatch = 0;
@@ -349,57 +300,48 @@ const buffer = {
 /** High-performance in-memory Local Storage (backed by native RwLock<HashMap>) */
 const ls = {
     get: (key) => {
-        if (!native_ls_get) throw new Error("Native ls_get not found");
-        return native_ls_get(key);
+        return natives.ls_get(key);
     },
     set: (key, value) => {
-        if (!native_ls_set) throw new Error("Native ls_set not found");
-        native_ls_set(key, String(value));
+        natives.ls_set(key, String(value));
     },
     remove: (key) => {
-        if (!native_ls_remove) throw new Error("Native ls_remove not found");
-        native_ls_remove(key);
+        natives.ls_remove(key);
     },
     clear: () => {
-        if (!native_ls_clear) throw new Error("Native ls_clear not found");
-        native_ls_clear();
+        natives.ls_clear();
     },
     keys: () => {
-        if (!native_ls_keys) throw new Error("Native ls_keys not found");
-        const result = native_ls_keys();
+        const result = natives.ls_keys();
         try {
-            return JSON.parse(result);
+            return typeof result === 'string' ? JSON.parse(result) : result;
         } catch (e) {
             return [];
         }
     },
     /** Native V8 serialization - supports Map, Set, Date, Uint8Array, etc. */
     serialize: (value) => {
-        if (!native_serialize) throw new Error("Native serialize not found");
-        return native_serialize(value);
+        return t.serialize ? t.serialize(value) : (natives.serialize ? natives.serialize(value) : null);
     },
     /** Native V8 deserialization - restores complex JS objects */
     deserialize: (bytes) => {
-        if (!native_deserialize) throw new Error("Native deserialize not found");
-        return native_deserialize(bytes);
+        return t.deserialize ? t.deserialize(bytes) : (natives.deserialize ? natives.deserialize(bytes) : null);
     },
     /** Store a complex JS object using native V8 serialization */
     setObject: (key, value) => {
-        if (!native_serialize) throw new Error("Native serialize not found");
-        if (!native_ls_set) throw new Error("Native ls_set not found");
-        const bytes = native_serialize(value);
+        if (!natives.serialize) return;
+        const bytes = natives.serialize(value);
         const base64 = buffer.toBase64(bytes);
-        native_ls_set(key, base64);
+        natives.ls_set(key, base64);
     },
     /** Retrieve and restore a complex JS object */
     getObject: (key) => {
-        if (!native_deserialize) throw new Error("Native deserialize not found");
-        if (!native_ls_get) throw new Error("Native ls_get not found");
-        const base64 = native_ls_get(key);
+        if (!natives.deserialize) return null;
+        const base64 = natives.ls_get(key);
         if (!base64) return null;
         try {
             const bytes = buffer.fromBase64(base64);
-            return native_deserialize(bytes);
+            return natives.deserialize(bytes);
         } catch (e) {
             return null;
         }
@@ -410,20 +352,16 @@ const ls = {
 /** High-performance in-memory Session Management (backed by native RwLock<HashMap>) */
 const session = {
     get: (sessionId, key) => {
-        if (!native_session_get) throw new Error("Native session_get not found");
-        return native_session_get(sessionId, key);
+        return natives.session_get(sessionId, key);
     },
     set: (sessionId, key, value) => {
-        if (!native_session_set) throw new Error("Native session_set not found");
-        native_session_set(sessionId, key, String(value));
+        natives.session_set(sessionId, key, String(value));
     },
     delete: (sessionId, key) => {
-        if (!native_session_delete) throw new Error("Native session_delete not found");
-        native_session_delete(sessionId, key);
+        natives.session_delete(sessionId, key);
     },
     clear: (sessionId) => {
-        if (!native_session_clear) throw new Error("Native session_clear not found");
-        native_session_clear(sessionId);
+        natives.session_clear(sessionId);
     }
 };
 
@@ -532,29 +470,34 @@ response.empty = (status = 204) => {
 // --- OS ---
 const os = {
     platform: () => {
-        if (!native_os_info) return "unknown";
-        const info = JSON.parse(native_os_info());
+        if (!natives.os_info) return "unknown";
+        const result = natives.os_info();
+        const info = typeof result === 'string' ? JSON.parse(result) : result;
         return info.platform;
     },
     cpus: () => {
-        if (!native_os_info) return 1;
-        const info = JSON.parse(native_os_info());
+        if (!natives.os_info) return 1;
+        const result = natives.os_info();
+        const info = typeof result === 'string' ? JSON.parse(result) : result;
         return info.cpus;
     },
     totalMemory: () => {
-        if (!native_os_info) return 0;
-        const info = JSON.parse(native_os_info());
+        if (!natives.os_info) return 0;
+        const result = natives.os_info();
+        const info = typeof result === 'string' ? JSON.parse(result) : result;
         return info.totalMemory;
     },
     freeMemory: () => {
-        if (!native_os_info) return 0;
-        const info = JSON.parse(native_os_info());
+        if (!natives.os_info) return 0;
+        const result = natives.os_info();
+        const info = typeof result === 'string' ? JSON.parse(result) : result;
         return info.freeMemory;
     },
     tmpdir: () => {
-        if (!native_os_info) return '/tmp';
+        if (!natives.os_info) return '/tmp';
         try {
-            const info = JSON.parse(native_os_info());
+            const result = natives.os_info();
+            const info = typeof result === 'string' ? JSON.parse(result) : result;
             return info.tempDir || '/tmp';
         } catch (e) {
             return '/tmp';
@@ -565,23 +508,28 @@ const os = {
 // --- Net ---
 const net = {
     resolveDNS: (hostname) => {
-        if (!native_net_resolve) return [];
-        return JSON.parse(native_net_resolve(hostname));
+        if (!natives.net_resolve) return [];
+        const result = natives.net_resolve(hostname);
+        return typeof result === 'string' ? JSON.parse(result) : result;
     },
-    ip: () => native_net_ip ? native_net_ip() : "127.0.0.1",
+    ip: () => natives.net_ip ? natives.net_ip() : "127.0.0.1",
     ping: (host) => true
 };
 
 // --- Proc ---
 const proc = {
     pid: () => {
-        if (!native_proc_info) return 0;
-        const info = JSON.parse(native_proc_info());
+        if (!natives.proc_info) return 0;
+        const result = natives.proc_info();
+        if (!result) return 0;
+        const info = typeof result === 'string' ? JSON.parse(result) : result;
         return info.pid;
     },
     uptime: () => {
-        if (!native_proc_info) return 0;
-        const info = JSON.parse(native_proc_info());
+        if (!natives.proc_info) return 0;
+        const result = natives.proc_info();
+        if (!result) return 0;
+        const info = typeof result === 'string' ? JSON.parse(result) : result;
         return info.uptime;
     },
     memory: () => ({})
@@ -590,7 +538,7 @@ const proc = {
 // --- Time ---
 const time = {
     sleep: (ms) => {
-        if (native_time_sleep) native_time_sleep(ms);
+        if (natives.time_sleep) natives.time_sleep(ms);
     },
     now: () => Date.now(),
     timestamp: () => new Date().toISOString()

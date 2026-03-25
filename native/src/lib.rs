@@ -60,8 +60,8 @@ fn safe_string(bytes: &[u8]) -> String {
 #[no_mangle]
 pub extern "C" fn fs_read_file(path: *const c_char) -> *mut c_char {
     let path_str = ptr_to_string(path);
-    match std::fs::read_to_string(path_str) {
-        Ok(content) => string_to_ptr(content),
+    match std::fs::read(path_str) {
+        Ok(bytes) => string_to_ptr(String::from_utf8_lossy(&bytes).into_owned()),
         Err(e) => string_to_ptr(format!("ERROR: {}", e)),
     }
 }
@@ -479,4 +479,224 @@ pub extern "C" fn session_delete(sid: *const c_char, key: *const c_char) {
 pub extern "C" fn session_clear(sid: *const c_char) {
     let sid_str = ptr_to_string(sid);
     let _ = storage_impl::session_clear(&sid_str);
+}
+
+// --- TITAN ABI: Unified JSON Export ---
+// All native calls pass through this single entry point.
+// Request: { "function": "fn_name", "params": [...args] }
+// Response: any JSON value
+
+#[no_mangle]
+pub extern "C" fn titan_export(request_json: *const c_char) -> *const c_char {
+    let request_str = ptr_to_string(request_json);
+    let request: serde_json::Value = match serde_json::from_str(&request_str) {
+        Ok(v) => v,
+        Err(_) => return string_to_ptr(serde_json::json!({"error": "Invalid request JSON"}).to_string()),
+    };
+
+    let function = request["function"].as_str().unwrap_or("");
+    let params = request["params"].as_array();
+
+    let res = match function {
+
+        // ── File System ──────────────────────────────────────────────────
+        "fs_read_file" => {
+            let path = params.and_then(|p| p.get(0)).and_then(|v| v.as_str()).unwrap_or("");
+            match std::fs::read(path) {
+                Ok(bytes) => serde_json::json!(String::from_utf8_lossy(&bytes).to_string()),
+                Err(e)    => serde_json::json!(format!("ERROR: {}", e)),
+            }
+        },
+        "fs_write_file" => {
+            let path    = params.and_then(|p| p.get(0)).and_then(|v| v.as_str()).unwrap_or("");
+            let content = params.and_then(|p| p.get(1)).and_then(|v| v.as_str()).unwrap_or("");
+            match std::fs::write(path, content) {
+                Ok(_)  => serde_json::json!(true),
+                Err(e) => serde_json::json!(format!("ERROR: {}", e)),
+            }
+        },
+        "fs_exists" => {
+            let path = params.and_then(|p| p.get(0)).and_then(|v| v.as_str()).unwrap_or("");
+            serde_json::json!(std::path::Path::new(path).exists())
+        },
+        "fs_readdir" => {
+            let path = params.and_then(|p| p.get(0)).and_then(|v| v.as_str()).unwrap_or("");
+            match std::fs::read_dir(path) {
+                Ok(entries) => {
+                    let files: Vec<String> = entries
+                        .filter_map(|e| e.ok().and_then(|e| e.file_name().into_string().ok()))
+                        .collect();
+                    serde_json::json!(files)
+                },
+                Err(e) => serde_json::json!(format!("ERROR: {}", e)),
+            }
+        },
+        "fs_mkdir" => {
+            let path = params.and_then(|p| p.get(0)).and_then(|v| v.as_str()).unwrap_or("");
+            match std::fs::create_dir_all(path) {
+                Ok(_)  => serde_json::json!(true),
+                Err(e) => serde_json::json!(format!("ERROR: {}", e)),
+            }
+        },
+        "fs_stat" => {
+            let path = params.and_then(|p| p.get(0)).and_then(|v| v.as_str()).unwrap_or("");
+            match std::fs::metadata(path) {
+                Ok(m) => serde_json::json!({
+                    "size":     m.len(),
+                    "isFile":   m.is_file(),
+                    "isDir":    m.is_dir(),
+                }),
+                Err(e) => serde_json::json!(format!("ERROR: {}", e)),
+            }
+        },
+        "fs_remove" => {
+            let path = params.and_then(|p| p.get(0)).and_then(|v| v.as_str()).unwrap_or("");
+            let p = std::path::Path::new(path);
+            let res = if p.is_dir() { std::fs::remove_dir_all(p) } else { std::fs::remove_file(p) };
+            match res {
+                Ok(_)  => serde_json::json!(true),
+                Err(e) => serde_json::json!(format!("ERROR: {}", e)),
+            }
+        },
+
+        // ── Crypto ──────────────────────────────────────────────────────
+        "crypto_uuid" => serde_json::json!(uuid::Uuid::new_v4().to_string()),
+        "crypto_hash" => {
+            let algo = params.and_then(|p| p.get(0)).and_then(|v| v.as_str()).unwrap_or("sha256");
+            let data = params.and_then(|p| p.get(1)).and_then(|v| v.as_str()).unwrap_or("");
+            serde_json::json!(crypto_impl::hash(algo, data))
+        },
+        "crypto_random_bytes" => {
+            let size = params.and_then(|p| p.get(0)).and_then(|v| v.as_u64()).unwrap_or(32) as usize;
+            serde_json::json!(crypto_impl::random_bytes(size))
+        },
+        "crypto_encrypt" => {
+            let algo = params.and_then(|p| p.get(0)).and_then(|v| v.as_str()).unwrap_or("aes-256-gcm");
+            let payload_str = params.and_then(|p| p.get(1)).and_then(|v| v.as_str()).unwrap_or("{}");
+            let payload: serde_json::Value = serde_json::from_str(payload_str).unwrap_or(serde_json::json!({}));
+            let key       = payload["key"].as_str().unwrap_or("");
+            let plaintext = payload["plaintext"].as_str().unwrap_or("");
+            match crypto_impl::encrypt(algo, key, plaintext) {
+                Ok(s)  => serde_json::json!(s),
+                Err(e) => serde_json::json!(format!("ERROR: {}", e)),
+            }
+        },
+        "crypto_decrypt" => {
+            let algo = params.and_then(|p| p.get(0)).and_then(|v| v.as_str()).unwrap_or("aes-256-gcm");
+            let payload_str = params.and_then(|p| p.get(1)).and_then(|v| v.as_str()).unwrap_or("{}");
+            let payload: serde_json::Value = serde_json::from_str(payload_str).unwrap_or(serde_json::json!({}));
+            let key        = payload["key"].as_str().unwrap_or("");
+            let ciphertext = payload["ciphertext"].as_str().unwrap_or("");
+            match crypto_impl::decrypt(algo, key, ciphertext) {
+                Ok(bytes) => serde_json::json!(String::from_utf8_lossy(&bytes).to_string()),
+                Err(e)    => serde_json::json!(format!("ERROR: {}", e)),
+            }
+        },
+        "crypto_hash_keyed" => {
+            let algo = params.and_then(|p| p.get(0)).and_then(|v| v.as_str()).unwrap_or("sha256");
+            let payload_str = params.and_then(|p| p.get(1)).and_then(|v| v.as_str()).unwrap_or("{}");
+            let payload: serde_json::Value = serde_json::from_str(payload_str).unwrap_or(serde_json::json!({}));
+            let key     = payload["key"].as_str().unwrap_or("");
+            let message = payload["message"].as_str().unwrap_or("");
+            match crypto_impl::hash_keyed(algo, key, message) {
+                Ok(s)  => serde_json::json!(s),
+                Err(e) => serde_json::json!(format!("ERROR: {}", e)),
+            }
+        },
+        "crypto_compare" => {
+            let a = params.and_then(|p| p.get(0)).and_then(|v| v.as_str()).unwrap_or("");
+            let b = params.and_then(|p| p.get(1)).and_then(|v| v.as_str()).unwrap_or("");
+            serde_json::json!(crypto_impl::compare(a, b))
+        },
+
+        // ── Local Storage ───────────────────────────────────────────────
+        "ls_get" => {
+            let key = params.and_then(|p| p.get(0)).and_then(|v| v.as_str()).unwrap_or("");
+            serde_json::json!(storage_impl::ls_get(key))
+        },
+        "ls_set" => {
+            let key   = params.and_then(|p| p.get(0)).and_then(|v| v.as_str()).unwrap_or("");
+            let value = params.and_then(|p| p.get(1)).and_then(|v| v.as_str()).unwrap_or("");
+            storage_impl::ls_set(key, value);
+            serde_json::json!(true)
+        },
+        "ls_remove" => {
+            let key = params.and_then(|p| p.get(0)).and_then(|v| v.as_str()).unwrap_or("");
+            storage_impl::ls_remove(key);
+            serde_json::json!(true)
+        },
+        "ls_clear" => { storage_impl::ls_clear(); serde_json::json!(true) },
+        "ls_keys" => serde_json::json!(storage_impl::ls_keys()),
+        "serialize" => {
+             // In IPC mode, we can't really do native V8 serialization of handles easily.
+             // But for compatibility with the Proxy, we can return an error or a placeholder.
+             // Actually, the JS side should use t.serialize if available.
+             // If we are here, it means we are in the NativeHost process, which has NO V8 scope.
+             // So we CANNOT perform native V8 serialization here.
+             serde_json::json!({"error": "Native V8 serialization requires engine-level built-ins. Please update titan-server."})
+        },
+        "deserialize" => {
+             serde_json::json!({"error": "Native V8 deserialization requires engine-level built-ins. Please update titan-server."})
+        },
+
+        // ── Sessions ────────────────────────────────────────────────────
+        "session_get" => {
+            let sid = params.and_then(|p| p.get(0)).and_then(|v| v.as_str()).unwrap_or("");
+            let key = params.and_then(|p| p.get(1)).and_then(|v| v.as_str()).unwrap_or("");
+            serde_json::json!(storage_impl::session_get(sid, key))
+        },
+        "session_set" => {
+            let sid   = params.and_then(|p| p.get(0)).and_then(|v| v.as_str()).unwrap_or("");
+            let key   = params.and_then(|p| p.get(1)).and_then(|v| v.as_str()).unwrap_or("");
+            let value = params.and_then(|p| p.get(2)).and_then(|v| v.as_str()).unwrap_or("");
+            storage_impl::session_set(sid, key, value);
+            serde_json::json!(true)
+        },
+        "session_delete" => {
+            let sid = params.and_then(|p| p.get(0)).and_then(|v| v.as_str()).unwrap_or("");
+            let key = params.and_then(|p| p.get(1)).and_then(|v| v.as_str()).unwrap_or("");
+            storage_impl::session_delete(sid, key);
+            serde_json::json!(true)
+        },
+        "session_clear" => {
+            let sid = params.and_then(|p| p.get(0)).and_then(|v| v.as_str()).unwrap_or("");
+            storage_impl::session_clear(sid);
+            serde_json::json!(true)
+        },
+
+        // ── System / OS ─────────────────────────────────────────────────
+        "os_info" => {
+            serde_json::json!({
+                "platform":    std::env::consts::OS,
+                "arch":        std::env::consts::ARCH,
+                "cpus":        thread::available_parallelism().map(|n| n.get()).unwrap_or(1),
+                "totalMemory": sys_info::mem_info().map(|m| m.total * 1024).unwrap_or(0),
+                "freeMemory":  sys_info::mem_info().map(|m| m.free  * 1024).unwrap_or(0),
+                "tempDir":     std::env::temp_dir().to_string_lossy().to_string(),
+            })
+        },
+        "proc_info" => {
+            serde_json::json!({
+                "pid":    std::process::id(),
+                "uptime": 0,
+            })
+        },
+        "path_cwd" => {
+            serde_json::json!(std::env::current_dir()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default())
+        },
+        "net_resolve" => {
+            let host = params.and_then(|p| p.get(0)).and_then(|v| v.as_str()).unwrap_or("");
+            use std::net::ToSocketAddrs;
+            match (host, 80u16).to_socket_addrs() {
+                Ok(mut addrs) => serde_json::json!(addrs.next().map(|a| a.ip().to_string())),
+                Err(_)        => serde_json::json!(null),
+            }
+        },
+
+        _ => serde_json::json!({"error": format!("Function '{}' not found in @titanpl/core", function)}),
+    };
+
+    string_to_ptr(res.to_string())
 }
