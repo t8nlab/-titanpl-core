@@ -141,6 +141,50 @@ declare global {
             readFile(path: string): string;
 
             /**
+             * Read the entire contents of a file as a Base64-encoded string.
+             *
+             * This is useful when you need to move binary file contents through
+             * JSON, embed assets in data URLs, or store file data in systems that
+             * expect plain strings.
+             *
+             * @param path - Absolute or relative path to the file
+             * @returns File contents encoded as Base64
+             * @throws If the file does not exist or cannot be read
+             *
+             * @example
+             * ```js
+             * const logoBase64 = t.fs.readFileBase64("./public/logo.png");
+             *
+             * return t.response.json({
+             *     name: "logo.png",
+             *     dataUrl: `data:image/png;base64,${logoBase64}`
+             * });
+             * ```
+             */
+            readFileBase64(path: string): string;
+
+            /**
+             * Read the entire contents of a file as raw binary bytes.
+             *
+             * Returns a `Uint8Array`, which is ideal for file downloads, hashing,
+             * image processing, or passing binary data to `t.response.binary()`.
+             *
+             * @param path - Absolute or relative path to the file
+             * @returns File contents as `Uint8Array`
+             * @throws If the file does not exist or cannot be read
+             *
+             * @example
+             * ```js
+             * const pdfBytes = t.fs.readFileBinary("./files/report.pdf");
+             * const checksum = t.crypto.hash("sha256", t.buffer.toHex(pdfBytes));
+             *
+             * t.log("PDF size:", pdfBytes.length);
+             * t.log("Checksum:", checksum);
+             * ```
+             */
+            readFileBinary(path: string): Uint8Array;
+
+            /**
              * Write string content to a file, creating or overwriting it.
              *
              * Parent directories are **not** created automatically —
@@ -156,6 +200,29 @@ declare global {
              * ```
              */
             writeFile(path: string, content: string): void;
+
+            /**
+             * Write binary content to a file, creating or overwriting it.
+             *
+             * Use this when your source data is already in binary form such as a
+             * `Uint8Array` from `t.buffer`, `t.fs.readFileBinary()`, or a network
+             * response payload.
+             *
+             * Parent directories are **not** created automatically —
+             * use `mkdir()` first if needed.
+             *
+             * @param path - Target file path
+             * @param bytes - Binary content to write
+             *
+             * @example
+             * ```js
+             * const avatar = t.fs.readFileBinary("./seed/avatar.png");
+             *
+             * t.fs.mkdir("./uploads");
+             * t.fs.writeFileBinary("./uploads/avatar-copy.png", avatar);
+             * ```
+             */
+            writeFileBinary(path: string, bytes: Uint8Array): void;
 
             /**
              * List all entries (files and directories) in a directory.
@@ -204,6 +271,49 @@ declare global {
              * ```
              */
             exists(path: string): boolean;
+
+            /**
+             * Check whether the given path points to a directory.
+             *
+             * This is a convenience helper around `fs.stat()` when you only need
+             * a boolean answer.
+             *
+             * @param path - Path to check
+             * @returns `true` if the path exists and is a directory
+             *
+             * @example
+             * ```js
+             * if (t.fs.isDirectory("./app/actions")) {
+             *     const files = t.fs.readdir("./app/actions");
+             *     t.log("Action count:", files.length);
+             * }
+             * ```
+             */
+            isDirectory(path: string): boolean;
+
+            /**
+             * Check whether the given path points to a regular file.
+             *
+             * This is useful before reading user-provided paths or when filtering
+             * directory entries down to files only.
+             *
+             * @param path - Path to check
+             * @returns `true` if the path exists and is a file
+             *
+             * @example
+             * ```js
+             * const fullPath = t.path.join("./public", "favicon.ico");
+             *
+             * if (t.fs.isFile(fullPath)) {
+             *     return t.response.binary(t.fs.readFileBinary(fullPath), {
+             *         type: "image/x-icon"
+             *     });
+             * }
+             *
+             * return t.response.json({ error: "File not found" }, { status: 404 });
+             * ```
+             */
+            isFile(path: string): boolean;
 
             /**
              * Get metadata/statistics about a file or directory.
@@ -258,6 +368,8 @@ declare global {
             isFile: boolean;
             /** `true` if the path is a directory */
             isDir: boolean;
+            /** Entry type reported by the runtime */
+            type?: 'file' | 'directory' | string;
             /** Last modification time as Unix timestamp in milliseconds */
             modified: number;
         }
@@ -1941,6 +2053,47 @@ declare global {
             json(content: any, options?: ResponseOptions): ResponseObject;
 
             /**
+             * Send a binary response using raw bytes.
+             *
+             * This helper is intended for file downloads, images, PDFs, audio,
+             * or any other non-text payload. It marks the response as binary so
+             * the Titan runtime can send the bytes directly instead of treating
+             * them like a UTF-8 string.
+             *
+             * By default, `Content-Type` is set to
+             * `application/octet-stream`. You can override it with `options.type`.
+             *
+             * @param bytes - Raw binary payload as `Uint8Array`
+             * @param options - Optional response options including `status`, `headers`, and MIME `type`
+             * @returns ResponseObject
+             *
+             * @example
+             * ```js
+             * export function getLogo() {
+             *     const bytes = t.fs.readFileBinary("./public/logo.png");
+             *     return t.response.binary(bytes, {
+             *         type: "image/png",
+             *         headers: {
+             *             "Cache-Control": "public, max-age=3600"
+             *         }
+             *     });
+             * }
+             *
+             * export function downloadBackup() {
+             *     const backup = t.fs.readFileBinary("./backups/latest.zip");
+             *     return t.response.binary(backup, {
+             *         type: "application/zip",
+             *         status: 200,
+             *         headers: {
+             *             "Content-Disposition": "attachment; filename=\"latest.zip\""
+             *         }
+             *     });
+             * }
+             * ```
+             */
+            binary(bytes: Uint8Array, options?: BinaryResponseOptions): ResponseObject;
+
+            /**
              * Create an HTTP redirect response.
              *
              * @param url - Target URL to redirect to
@@ -2023,6 +2176,30 @@ declare global {
         }
 
         /**
+         * Options for binary responses created by `t.response.binary()`.
+         */
+        interface BinaryResponseOptions extends ResponseOptions {
+            /**
+             * MIME type for the binary payload.
+             * @default "application/octet-stream"
+             *
+             * @example
+             * ```js
+             * type: "image/png"
+             * type: "application/pdf"
+             * type: "audio/mpeg"
+             * ```
+             */
+            type?: string;
+
+            /**
+             * Binary responses ignore `body` and send the provided byte array
+             * directly.
+             */
+            body?: never;
+        }
+
+        /**
          * Standardized response object consumed by the Titan runtime.
          *
          * Created by `t.response()` and its helper methods.
@@ -2035,8 +2212,10 @@ declare global {
             status: number;
             /** HTTP headers */
             headers: Record<string, string>;
-            /** Response body */
-            body: string;
+            /** Response body as text or binary bytes */
+            body: string | Uint8Array;
+            /** `true` when the response body should be sent as raw bytes */
+            _isBinary?: true;
         }
     }
 

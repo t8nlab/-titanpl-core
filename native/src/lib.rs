@@ -55,6 +55,13 @@ fn safe_string(bytes: &[u8]) -> String {
     }
 }
 
+fn read_file_base64_impl(path: &str) -> Result<String, String> {
+    let bytes = std::fs::read(path)
+        .map_err(|e| e.to_string())?;
+
+    Ok(general_purpose::STANDARD.encode(bytes))
+}
+
 // --- File System ---
 
 #[no_mangle]
@@ -125,6 +132,16 @@ pub extern "C" fn fs_remove(path: *const c_char) {
         let _ = std::fs::remove_dir_all(p);
     } else {
         let _ = std::fs::remove_file(p);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn fs_read_file_base64(path: *const c_char) -> *mut c_char {
+    let path_str = ptr_to_string(path);
+
+    match read_file_base64_impl(&path_str) {
+        Ok(res) => string_to_ptr(res),
+        Err(e) => string_to_ptr(format!("ERROR: {}", e)),
     }
 }
 
@@ -558,6 +575,22 @@ pub extern "C" fn titan_export(request_json: *const c_char) -> *const c_char {
                 Err(e) => serde_json::json!(format!("ERROR: {}", e)),
             }
         },
+        "fs_read_file_base64" => {
+            let path = params
+                .and_then(|p| p.get(0))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+
+            match std::fs::read(path) {
+                Ok(bytes) => {
+                    let base64 = general_purpose::STANDARD.encode(bytes);
+                    serde_json::json!(base64)
+                }
+                Err(e) => {
+                    serde_json::json!(format!("ERROR: {}", e))
+                }
+            }
+        },
 
         // ── Crypto ──────────────────────────────────────────────────────
         "crypto_uuid" => serde_json::json!(uuid::Uuid::new_v4().to_string()),
@@ -628,11 +661,6 @@ pub extern "C" fn titan_export(request_json: *const c_char) -> *const c_char {
         "ls_clear" => { storage_impl::ls_clear(); serde_json::json!(true) },
         "ls_keys" => serde_json::json!(storage_impl::ls_keys()),
         "serialize" => {
-             // In IPC mode, we can't really do native V8 serialization of handles easily.
-             // But for compatibility with the Proxy, we can return an error or a placeholder.
-             // Actually, the JS side should use t.serialize if available.
-             // If we are here, it means we are in the NativeHost process, which has NO V8 scope.
-             // So we CANNOT perform native V8 serialization here.
              serde_json::json!({"error": "Native V8 serialization requires engine-level built-ins. Please update titan-server."})
         },
         "deserialize" => {

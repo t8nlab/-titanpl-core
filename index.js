@@ -157,6 +157,32 @@ const fs = {
     remove: (path) => {
         const res = natives.fs_remove(path);
         if (res && typeof res === 'string' && res.startsWith("ERROR:")) throw new Error(res);
+    },
+    /** Reads file content as base64 string */
+    readFileBase64: (path) => {
+        const res = natives.fs_read_file_base64(path);
+        if (res && typeof res === 'string' && res.startsWith("ERROR:")) throw new Error(res);
+        return res;
+    },
+    /** Reads file content as binary (Uint8Array) */
+    readFileBinary: (path) => {
+        const base64 = fs.readFileBase64(path);
+        return buffer.fromBase64(base64);
+    },
+    /** Writes binary content to file */
+    writeFileBinary: (path, bytes) => {
+        const base64 = buffer.toBase64(bytes);
+        fs.writeFile(path, base64);
+    },
+    /** Checks if path is directory */
+    isDirectory: (path) => {
+        const stats = fs.stat(path);
+        return stats.type === 'directory';
+    },
+    /** Checks if path is file */
+    isFile: (path) => {
+        const stats = fs.stat(path);
+        return stats.type === 'file';
     }
 };
 
@@ -464,6 +490,19 @@ response.empty = (status = 204) => {
         status: status,
         headers: {},
         body: ""
+    };
+};
+
+response.binary = (bytes, options = {}) => {
+    return {
+        _isResponse: true,
+        status: options.status || 200,
+        headers: {
+            "Content-Type": options.type || "application/octet-stream",
+            ...options.headers
+        },
+        body: bytes,
+        _isBinary: true
     };
 };
 

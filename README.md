@@ -18,8 +18,11 @@ The extension automatically attaches to the Titan runtime.
 
 ### Modern ESM Import (Highly Recommended)
 Best for IDE support, autocompletion, and type checking.
+
+**Make sure you installed `@titanpl/native`**
+
 ```javascript
-import { fs, crypto, ls } from "@titanpl/core";
+import { fs, crypto, ls } from "@titanpl/native";
 
 const content = fs.readFile("config.json");
 ```
@@ -31,12 +34,29 @@ const content = fs.readFile("config.json");
 ### `fs` (File System)
 Synchronous file system operations.
 - `fs.readFile(path: string): string` - Read file content as UTF-8 string.
+- `fs.readFileBase64(path: string): string` - Read file content as a Base64-encoded string.
 - `fs.writeFile(path: string, content: string): void` - Write string content to file.
+- `fs.writeFileBinary(path: string, bytes: Uint8Array): void` - Write binary content to file.
 - `fs.exists(path: string): boolean` - Check if a path exists.
+- `fs.isDirectory(path: string): boolean` - Check whether a path points to a directory.
+- `fs.isFile(path: string): boolean` - Check whether a path points to a regular file.
 - `fs.mkdir(path: string): void` - Create a directory (recursive).
 - `fs.remove(path: string): void` - Remove file or directory.
 - `fs.readdir(path: string): string[]` - List directory contents.
-- `fs.stat(path: string): object` - Get file statistics `{ isFile: boolean, isDir: boolean, size: number, modified: number }`.
+- `fs.stat(path: string): object` - Get file statistics `{ isFile: boolean, isDir: boolean, size: number, modified: number, type?: string }`.
+
+Example:
+```javascript
+import { fs, response } from "@titanpl/core";
+
+const imageBase64 = fs.readFileBase64("./public/logo.png");
+const imageBytes = fs.readFileBinary("./public/logo.png");
+
+if (fs.isFile("./public/logo.png")) {
+  fs.mkdir("./backup");
+  fs.writeFileBinary("./backup/logo-copy.png", imageBytes);
+}
+```
 
 ### `path` (Path Manipulation)
 Utilities for handling file paths.
@@ -117,7 +137,24 @@ Helper for constructing standardized Titan responses.
 - `response.text(content: string, options?: object): object` - Create a plain text response.
 - `response.json(data: any, options?: object): object` - Create a JSON response.
 - `response.html(content: string, options?: object): object` - Create an HTML response.
+- `response.binary(bytes: Uint8Array, options?: object): object` - Create a binary response for images, PDFs, downloads, and other raw bytes.
 - `response.redirect(url: string, status?: number): object` - Create a redirect response.
+
+Example:
+```javascript
+import { fs, response } from "@titanpl/native";
+
+export function getLogo() {
+  const bytes = fs.readFileBinary("./public/logo.png");
+
+  return response.binary(bytes, {
+    type: "image/png",
+    headers: {
+      "Cache-Control": "public, max-age=3600"
+    }
+  });
+}
+```
 
 ---
 
