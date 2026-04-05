@@ -203,20 +203,15 @@ const path = {
     resolve: (...args) => {
         let resolved = '';
         for (let arg of args) {
-            // If an argument is absolute, it becomes the new base
-            const isAbs = /^\/|^[a-zA-Z]:[\/\\]/.test(arg);
-            if (isAbs) {
-                resolved = arg;
-            } else {
-                resolved = path.join(resolved, arg);
-            }
+            resolved = path.join(resolved, arg);
         }
-        // If still not absolute, prepend CWD
-        const isCurrentlyAbs = /^\/|^[a-zA-Z]:[\/\\]/.test(resolved);
-        if (!isCurrentlyAbs && natives.path_cwd) {
-            const cwd = natives.path_cwd();
-            if (cwd) {
-                resolved = path.join(cwd, resolved);
+        if (!resolved.startsWith('/')) {
+            const isWindowsAbs = /^[a-zA-Z]:\\/.test(resolved) || resolved.startsWith('\\');
+            if (!isWindowsAbs && natives.path_cwd) {
+                const cwd = natives.path_cwd();
+                if (cwd) {
+                    resolved = path.join(cwd, resolved);
+                }
             }
         }
         return resolved;
@@ -442,6 +437,8 @@ const cookies = {
 
 
 
+
+
 // --- Response ---
 /**
  * Advanced HTTP Response Management
@@ -453,7 +450,7 @@ const cookies = {
 const response = (optionsOrBody, status = 200, headers = {}) => {
     // Determine if first arg is an options object
     const IsObjectArg = optionsOrBody && typeof optionsOrBody === 'object' && !Array.isArray(optionsOrBody);
-    
+
     // It's an options object if it has known keys OR if it's the only argument passed and it's an object
     const isOptions = IsObjectArg && ('body' in optionsOrBody || 'status' in optionsOrBody || 'headers' in optionsOrBody || Object.keys(optionsOrBody).length === 0);
 
@@ -648,25 +645,6 @@ const proc = {
         const info = typeof result === 'string' ? JSON.parse(result) : result;
         return info.uptime;
     },
-    info: () => {
-        if (!natives.proc_info) return {};
-        const result = natives.proc_info();
-        return typeof result === 'string' ? JSON.parse(result) : result;
-    },
-    list: () => {
-        if (!natives.proc_list) return [];
-        const result = natives.proc_list();
-        return typeof result === 'string' ? JSON.parse(result) : result;
-    },
-    run: (cmd, args = []) => {
-        if (!natives.proc_run) return { ok: false, error: 'Not implemented' };
-        const result = natives.proc_run(JSON.stringify({ cmd, args }));
-        return typeof result === 'string' ? JSON.parse(result) : result;
-    },
-    kill: (pid) => {
-        if (!natives.proc_kill) return false;
-        return natives.proc_kill(pid);
-    },
     memory: () => ({})
 };
 
@@ -693,68 +671,27 @@ class TitanURLSearchParams {
             Object.assign(this._params, init);
         }
     }
-    append(key, value) {
-        if (!this._params[key]) this._params[key] = [];
-        if (!Array.isArray(this._params[key])) this._params[key] = [this._params[key]];
-        this._params[key].push(String(value));
-    }
-    get(key) {
-        const val = this._params[key];
-        return Array.isArray(val) ? val[0] : (val || null);
-    }
-    getAll(key) {
-        const val = this._params[key];
-        if (!val) return [];
-        return Array.isArray(val) ? val : [val];
-    }
+    get(key) { return this._params[key] || null; }
     set(key, value) { this._params[key] = String(value); }
     has(key) { return key in this._params; }
     delete(key) { delete this._params[key]; }
-    forEach(callback) {
-        for (const [key, value] of this.entries()) {
-            callback(value, key, this);
-        }
-    }
-    sort() {
-        const sorted = {};
-        const keys = Object.keys(this._params).sort();
-        for (const key of keys) sorted[key] = this._params[key];
-        this._params = sorted;
-    }
     toString() {
         return Object.entries(this._params)
-            .flatMap(([k, v]) => {
-                const values = Array.isArray(v) ? v : [v];
-                return values.map(val => `${encodeURIComponent(k)}=${encodeURIComponent(val)}`);
-            })
+            .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
             .join('&');
     }
-    entries() {
-        const result = [];
-        for (const [k, v] of Object.entries(this._params)) {
-            const values = Array.isArray(v) ? v : [v];
-            for (const val of values) result.push([k, val]);
-        }
-        return result;
-    }
+    entries() { return Object.entries(this._params); }
     keys() { return Object.keys(this._params); }
-    values() { 
-        const result = [];
-        for (const v of Object.values(this._params)) {
-            if (Array.isArray(v)) result.push(...v);
-            else result.push(v);
-        }
-        return result;
-    }
+    values() { return Object.values(this._params); }
 }
 
 const url = {
     parse: (str) => {
         if (typeof URL !== 'undefined') {
-            try { return new URL(str); } catch { return null; }
+            return new URL(str);
         }
-        const match = str.match(/^(https?:)\/\/([^\/:]+)(?::(\d+))?(\/[^?#]*)?(\?[^#]*)?(#.*)?$/);
-        if (!match) return null;
+        const match = str.match(/^(https?:)\/\/([^/:]+)(?::(\d+))?(\/[^?#]*)?(\?[^#]*)?(#.*)?$/);
+        if (!match) throw new Error('Invalid URL');
         return {
             protocol: match[1],
             hostname: match[2],
@@ -813,25 +750,3 @@ t["@titanpl/core"] = core;
 if (!t.exts) t.exts = {};
 t.exts["titan-core"] = core;
 t.exts["@titanpl/core"] = core;
-
-/**
- * ESM Exports for testing and standard imports
- */
-export {
-    fs,
-    path,
-    crypto,
-    os,
-    net,
-    proc,
-    time,
-    url,
-    buffer,
-    ls,
-    session,
-    cookies,
-    response,
-    core
-};
-
-export default core;
