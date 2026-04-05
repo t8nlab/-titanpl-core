@@ -133,26 +133,52 @@ High-performance key-value storage persisted to disk.
 - `new url.SearchParams(init?: string)` - Construct query parameters.
 
 ### `response` (HTTP Response Builder)
-Helper for constructing standardized Titan responses.
-- `response.text(content: string, options?: object): object` - Create a plain text response.
-- `response.json(data: any, options?: object): object` - Create a JSON response.
-- `response.html(content: string, options?: object): object` - Create an HTML response.
-- `response.binary(bytes: Uint8Array, options?: object): object` - Create a binary response for images, PDFs, downloads, and other raw bytes.
-- `response.redirect(url: string, status?: number): object` - Create a redirect response.
+Advanced helper for constructing standardized Titan responses. All methods support both **positional** and **object-based** signatures for maximum flexibility.
 
-Example:
+#### Standard Response
+- `response(options: object): object` - Create response from `{ status, headers, body }`.
+- `response(body: any, status?: number|object, headers?: object): object` - Create response from positional arguments.
+
+#### Helpers
+- `response.text(content: string, statusOrOptions?: number|object, headers?: object): object` - Create a plain text response.
+- `response.json(data: any, statusOrOptions?: number|object, headers?: object): object` - Create a JSON response.
+- `response.html(content: string, statusOrOptions?: number|object, headers?: object): object` - Create an HTML response (automatic UTF-8).
+- `response.binary(bytes: Uint8Array|string, typeOrOptions?: string|object, headers?: object): object` - Create a binary response for images, PDFs, downloads, and other raw bytes.
+- `response.redirect(url: string, statusOrOptions?: number|object, headers?: object): object` - Create a redirect response (default `302`).
+- `response.empty(statusOrOptions?: number|object, headers?: object): object` - Create an empty response (default `204 No Content`).
+
+#### Usage Examples
+
+**1. Using Helpers (Positional)**
+```javascript
+// Quick JSON response
+return response.json({ success: true }, 201);
+
+// Redirect
+return response.redirect("/login");
+```
+
+**2. Using Options Object**
+```javascript
+// Complex response with custom headers
+return response.html("<h1>Titan</h1>", {
+  status: 200,
+  headers: {
+    "X-Powered-By": "TitanPlanet",
+    "Cache-Control": "no-store",
+    "Access-Control-Allow-Origin": "*"
+  }
+});
+```
+
+**3. Binary Support**
 ```javascript
 import { fs, response } from "@titanpl/native";
 
 export function getLogo() {
   const bytes = fs.readFileBinary("./public/logo.png");
-
-  return response.binary(bytes, {
-    type: "image/png",
-    headers: {
-      "Cache-Control": "public, max-age=3600"
-    }
-  });
+  // Supports direct MIME type or options object
+  return response.binary(bytes, "image/png");
 }
 ```
 

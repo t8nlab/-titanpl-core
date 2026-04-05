@@ -1,7 +1,7 @@
 // =============================================================================
 //  @titanpl/core — Module Type Definitions
 //  The official Core Standard Library for Titan Planet
-//  Version: 2.x
+//  Version: 3.0.x
 //  Repository: https://github.com/ezet-galaxy/-titanpl-core
 // =============================================================================
 
@@ -435,25 +435,27 @@ export declare const cookies: TitanCore.Cookies;
  * # Response Module
  *
  * HTTP response builder for controlled response formatting.
+ * Supports both object-based and positional argument signatures.
  *
  * **Methods:**
- * - `response(options)` — Custom response
- * - `response.json(data, options?)` — JSON response
- * - `response.html(content, options?)` — HTML response
- * - `response.text(content, options?)` — Plain text response
- * - `response.redirect(url, status?)` — Redirect response
- * - `response.empty(status?)` — Empty response (204)
+ * - `response(body, status?, headers?)` — Custom response
+ * - `response.json(data, status?, headers?)` — JSON response
+ * - `response.html(content, status?, headers?)` — HTML response
+ * - `response.text(content, status?, headers?)` — Plain text response
+ * - `response.redirect(url, status?, headers?)` — Redirect response
+ * - `response.empty(status?, headers?)` — Empty response (204)
+ * - `response.binary(bytes, type?, headers?)` — Binary response
  *
  * @example
  * ```js
  * import { response, fs } from '@titanpl/core';
  *
- * // JSON response
+ * // JSON response (Positional)
  * export function getUsers(req) {
- *     return response.json({ users: [], total: 0 });
+ *     return response.json({ users: [] }, 200, { "Cache-Control": "max-age=60" });
  * }
  *
- * // Error response
+ * // Error response (Object-based)
  * export function notFound(req) {
  *     return response.json({ error: "Not found" }, { status: 404 });
  * }
@@ -467,24 +469,6 @@ export declare const cookies: TitanCore.Cookies;
  * // Redirect
  * export function legacy(req) {
  *     return response.redirect("/api/v2/users", 301);
- * }
- *
- * // Custom response with headers
- * export function download(req) {
- *     return response({
- *         status: 200,
- *         headers: {
- *             "Content-Type": "text/csv",
- *             "Content-Disposition": "attachment; filename=\"data.csv\""
- *         },
- *         body: fs.readFile("./export.csv")
- *     });
- * }
- *
- * // Empty response (after DELETE)
- * export function deleteUser(req) {
- *     removeUser(req.params.id);
- *     return response.empty();
  * }
  * ```
  *

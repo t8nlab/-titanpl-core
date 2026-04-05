@@ -1,7 +1,7 @@
 // =============================================================================
 //  @titanpl/core — Global Type Declarations
 //  The official Core Standard Library for Titan Planet
-//  Version: 2.x
+//  Version: 3.0.x
 //  Repository: https://github.com/ezet-galaxy/-titanpl-core
 // =============================================================================
 
@@ -1970,24 +1970,23 @@ declare global {
          */
         interface ResponseModule {
             /**
-             * Create a fully custom response.
+             * Create a controlled HTTP response.
+             * 
+             * Supports both object-based configuration and positional arguments.
              *
-             * @param options - Response configuration
+             * @param optionsOrBody - ResponseOptions object or the response body content
+             * @param status - HTTP status code (if first arg is body)
+             * @param headers - Custom headers (if first arg is body)
              * @returns ResponseObject for the Titan runtime
              *
              * @example
-             * ```js
-             * return t.response({
-             *     status: 201,
-             *     headers: {
-             *         "X-Request-Id": requestId,
-             *         "Content-Type": "application/json"
-             *     },
-             *     body: JSON.stringify({ created: true })
-             * });
-             * ```
+             * // Object-based
+             * return t.response({ status: 200, body: "OK" });
+             * 
+             * // Positional
+             * return t.response("Hello", 200, { "X-Header": "Value" });
              */
-            (options: ResponseOptions): ResponseObject;
+            (optionsOrBody: ResponseOptions | string | any, status?: number, headers?: Record<string, string>): ResponseObject;
 
             /**
              * Send a plain text response.
@@ -1995,16 +1994,16 @@ declare global {
              * Automatically sets `Content-Type: text/plain; charset=utf-8`.
              *
              * @param content - Text content to send
-             * @param options - Optional response options (status, headers)
+             * @param statusOrOptions - HTTP status code (e.g. 200) or ResponseOptions object
+             * @param headers - Custom headers (only used if second argument is a number)
              * @returns ResponseObject
              *
              * @example
-             * ```js
              * return t.response.text("Hello, World!");
-             * return t.response.text("Not Found", { status: 404 });
-             * ```
+             * return t.response.text("Not Found", 404);
+             * return t.response.text("Created", 201, { "X-Auth": "Token" });
              */
-            text(content: string, options?: ResponseOptions): ResponseObject;
+            text(content: string, statusOrOptions?: number | ResponseOptions, headers?: Record<string, string>): ResponseObject;
 
             /**
              * Send an HTML response.
@@ -2012,21 +2011,16 @@ declare global {
              * Automatically sets `Content-Type: text/html; charset=utf-8`.
              *
              * @param content - HTML content to send
-             * @param options - Optional response options (status, headers)
+             * @param statusOrOptions - HTTP status code (e.g. 200) or ResponseOptions object
+             * @param headers - Custom headers (only used if second argument is a number)
              * @returns ResponseObject
              *
              * @example
-             * ```js
-             * const html = `<!DOCTYPE html>
-             * <html><body><h1>Welcome</h1></body></html>`;
-             * return t.response.html(html);
-             *
-             * // From file
              * const page = t.fs.readFile("./views/index.html");
              * return t.response.html(page);
-             * ```
+             * return t.response.html("<h1>Error</h1>", 500);
              */
-            html(content: string, options?: ResponseOptions): ResponseObject;
+            html(content: string, statusOrOptions?: number | ResponseOptions, headers?: Record<string, string>): ResponseObject;
 
             /**
              * Send a JSON response.
@@ -2034,104 +2028,63 @@ declare global {
              * Automatically sets `Content-Type: application/json` and
              * serializes the content with `JSON.stringify()`.
              *
-             * @param content - JavaScript object to serialize as JSON
-             * @param options - Optional response options (status, headers)
+             * @param content - JavaScript object to serialize
+             * @param statusOrOptions - HTTP status code (e.g. 200) or ResponseOptions object
+             * @param headers - Custom headers (only used if second argument is a number)
              * @returns ResponseObject
              *
              * @example
-             * ```js
-             * // Success response
-             * return t.response.json({ users: [], total: 0 });
-             *
-             * // Error response
-             * return t.response.json({ error: "Invalid input" }, { status: 400 });
-             *
-             * // Created response
-             * return t.response.json({ id: newId, created: true }, { status: 201 });
-             * ```
+             * return t.response.json({ users: [] });
+             * return t.response.json({ error: "Unauthorized" }, 401);
+             * return t.response.json(data, 200, { "Access-Control-Allow-Origin": "*" });
              */
-            json(content: any, options?: ResponseOptions): ResponseObject;
+            json(content: any, statusOrOptions?: number | ResponseOptions, headers?: Record<string, string>): ResponseObject;
 
             /**
              * Send a binary response using raw bytes.
              *
              * This helper is intended for file downloads, images, PDFs, audio,
              * or any other non-text payload. It marks the response as binary so
-             * the Titan runtime can send the bytes directly instead of treating
-             * them like a UTF-8 string.
+             * the Titan runtime can send the bytes directly.
              *
-             * By default, `Content-Type` is set to
-             * `application/octet-stream`. You can override it with `options.type`.
-             *
-             * @param bytes - Raw binary payload as `Uint8Array`
-             * @param options - Optional response options including `status`, `headers`, and MIME `type`
+             * @param bytes - Raw binary payload as `Uint8Array` or Base64 string
+             * @param typeOrOptions - MIME type string (e.g. "image/png") or BinaryResponseOptions
+             * @param headers - Custom headers (only used if second argument is a string)
              * @returns ResponseObject
              *
              * @example
-             * ```js
-             * export function getLogo() {
-             *     const bytes = t.fs.readFileBinary("./public/logo.png");
-             *     return t.response.binary(bytes, {
-             *         type: "image/png",
-             *         headers: {
-             *             "Cache-Control": "public, max-age=3600"
-             *         }
-             *     });
-             * }
-             *
-             * export function downloadBackup() {
-             *     const backup = t.fs.readFileBinary("./backups/latest.zip");
-             *     return t.response.binary(backup, {
-             *         type: "application/zip",
-             *         status: 200,
-             *         headers: {
-             *             "Content-Disposition": "attachment; filename=\"latest.zip\""
-             *         }
-             *     });
-             * }
-             * ```
+             * const bytes = t.fs.readFileBinary("./logo.png");
+             * return t.response.binary(bytes, "image/png");
+             * return t.response.binary(bytes, { status: 200, type: "image/png" });
              */
-            binary(bytes: Uint8Array, options?: BinaryResponseOptions): ResponseObject;
+            binary(bytes: Uint8Array | string, typeOrOptions?: string | BinaryResponseOptions, headers?: Record<string, string>): ResponseObject;
 
             /**
              * Create an HTTP redirect response.
              *
              * @param url - Target URL to redirect to
-             * @param status - HTTP status code (default: 302 Found)
+             * @param statusOrOptions - HTTP status code (default: 302 Found) or ResponseOptions
+             * @param headers - Custom headers (only used if second argument is a number)
              * @returns ResponseObject
              *
              * @example
-             * ```js
-             * // Temporary redirect (302)
              * return t.response.redirect("/login");
-             *
-             * // Permanent redirect (301)
-             * return t.response.redirect("/api/v2/users", 301);
-             *
-             * // External redirect
-             * return t.response.redirect("https://example.com/callback");
-             * ```
+             * return t.response.redirect("/home", 301);
              */
-            redirect(url: string, status?: number): ResponseObject;
+            redirect(url: string, statusOrOptions?: number | ResponseOptions, headers?: Record<string, string>): ResponseObject;
 
             /**
              * Create an empty response (no body).
              *
-             * Useful for DELETE operations or acknowledgments.
-             *
-             * @param status - HTTP status code (default: 204 No Content)
+             * @param statusOrOptions - HTTP status (default: 204) or ResponseOptions
+             * @param headers - Custom headers (only used if second argument is a number)
              * @returns ResponseObject
              *
              * @example
-             * ```js
-             * // After successful deletion
              * return t.response.empty(); // 204 No Content
-             *
-             * // Accepted for processing
-             * return t.response.empty(202);
-             * ```
+             * return t.response.empty(202); // Accepted
              */
-            empty(status?: number): ResponseObject;
+            empty(statusOrOptions?: number | ResponseOptions, headers?: Record<string, string>): ResponseObject;
         }
 
         /**

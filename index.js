@@ -203,15 +203,20 @@ const path = {
     resolve: (...args) => {
         let resolved = '';
         for (let arg of args) {
-            resolved = path.join(resolved, arg);
+            // If an argument is absolute, it becomes the new base
+            const isAbs = /^\/|^[a-zA-Z]:[\/\\]/.test(arg);
+            if (isAbs) {
+                resolved = arg;
+            } else {
+                resolved = path.join(resolved, arg);
+            }
         }
-        if (!resolved.startsWith('/')) {
-            const isWindowsAbs = /^[a-zA-Z]:\\/.test(resolved) || resolved.startsWith('\\');
-            if (!isWindowsAbs && natives.path_cwd) {
-                const cwd = natives.path_cwd();
-                if (cwd) {
-                    resolved = path.join(cwd, resolved);
-                }
+        // If still not absolute, prepend CWD
+        const isCurrentlyAbs = /^\/|^[a-zA-Z]:[\/\\]/.test(resolved);
+        if (!isCurrentlyAbs && natives.path_cwd) {
+            const cwd = natives.path_cwd();
+            if (cwd) {
+                resolved = path.join(cwd, resolved);
             }
         }
         return resolved;
@@ -381,7 +386,7 @@ const session = {
         return natives.session_get(sessionId, key);
     },
     set: (sessionId, key, value) => {
-        natives.session_set(sessionId, key, String(value));
+        natives.session_set(sessionId, JSON.stringify({ key, value: String(value) }));
     },
     delete: (sessionId, key) => {
         natives.session_delete(sessionId, key);
@@ -409,7 +414,7 @@ const cookies = {
     },
     /** Sets Set-Cookie header on response */
     set: (res, name, value, options = {}) => {
-        if (!res || !res.setHeader) return;
+        if (!res) return;
         let cookie = `${name}=${encodeURIComponent(value)}`;
         if (options.maxAge) cookie += `; Max-Age=${options.maxAge}`;
         if (options.path) cookie += `; Path=${options.path}`;
@@ -417,16 +422,27 @@ const cookies = {
         if (options.secure) cookie += `; Secure`;
         if (options.sameSite) cookie += `; SameSite=${options.sameSite}`;
 
-        let prev = res.getHeader ? res.getHeader('Set-Cookie') : null;
+        const getHeader = (n) => {
+            if (res.getHeader) return res.getHeader(n);
+            return res.headers ? res.headers[n] : null;
+        };
+
+        const setHeader = (n, v) => {
+            if (res.setHeader) return res.setHeader(n, v);
+            if (!res.headers) res.headers = {};
+            res.headers[n] = v;
+        };
+
+        let prev = getHeader('Set-Cookie');
         if (prev) {
             if (Array.isArray(prev)) {
                 prev.push(cookie);
-                res.setHeader('Set-Cookie', prev);
+                setHeader('Set-Cookie', prev);
             } else {
-                res.setHeader('Set-Cookie', [prev, cookie]);
+                setHeader('Set-Cookie', [prev, cookie]);
             }
         } else {
-            res.setHeader('Set-Cookie', cookie);
+            setHeader('Set-Cookie', cookie);
         }
     },
     /** Deletes cookie by setting maxAge=0 */
@@ -438,69 +454,177 @@ const cookies = {
 
 
 // --- Response ---
-/** Advanced HTTP Response Management */
-const response = (options) => {
+/**
+ * Advanced HTTP Response Management
+ * 
+ * This module provides functions to create standardized response objects
+ * for the Titan runtime. All methods support both positional and object-based
+ * argument signatures.
+ * 
+ * @example
+ * // Standard usage (object-based)
+ * return response({
+ *   status: 200,
+ *   headers: { "X-Powered-By": "Titan" },
+ *   body: "Hello World"
+ * });
+ * 
+ * // Helper usage (positional)
+ * return response.json({ ok: true }, 201, { "Access-Control-Allow-Origin": "*" });
+ */
+const response = (optionsOrBody, status = 200, headers = {}) => {
+    // Determine if first arg is an options object
+    const IsObjectArg = optionsOrBody && typeof optionsOrBody === 'object' && !Array.isArray(optionsOrBody);
+    
+    // It's an options object if it has known keys OR if it's the only argument passed and it's an object
+    const isOptions = IsObjectArg && ('body' in optionsOrBody || 'status' in optionsOrBody || 'headers' in optionsOrBody || Object.keys(optionsOrBody).length === 0);
+
+    if (isOptions) {
+        return {
+            _isResponse: true,
+            status: optionsOrBody.status || 200,
+            headers: optionsOrBody.headers || {},
+            body: optionsOrBody.body || ""
+        };
+    }
+
+    // Otherwise treat as (body, status, headers)
     return {
         _isResponse: true,
-        status: options.status || 200,
-        headers: options.headers || {},
-        body: options.body || ""
+        status: typeof status === 'number' ? status : 200,
+        headers: (typeof status === 'object' ? status : headers) || {},
+        body: optionsOrBody ?? ""
     };
 };
 
-response.text = (content, options = {}) => {
-    return {
-        _isResponse: true,
-        status: options.status || 200,
-        headers: { "Content-Type": "text/plain", ...(options.headers || {}) },
-        body: content
-    };
+/**
+ * Internal helper to parse overloaded response arguments
+ * @private
+ */
+function _parseResArgs(content, statusOrOptions, headers, defaultType) {
+    let status = 200;
+    let finalHeaders = {};
+
+    if (statusOrOptions && typeof statusOrOptions === 'object' && !Array.isArray(statusOrOptions)) {
+        status = statusOrOptions.status || 200;
+        finalHeaders = { ...(statusOrOptions.headers || {}) };
+    } else {
+        status = typeof statusOrOptions === 'number' ? statusOrOptions : 200;
+        finalHeaders = { ...(headers || {}) };
+    }
+
+    if (defaultType && !finalHeaders["Content-Type"]) {
+        finalHeaders["Content-Type"] = defaultType;
+    }
+
+    return { status, headers: finalHeaders, body: content };
+}
+
+/**
+ * Returns a plain text response.
+ * @param {string} content - The text body
+ * @param {number|object} [statusOrOptions=200] - Status code or { status, headers }
+ * @param {object} [headers={}] - Additional headers (if status is number)
+ * @returns {object} Standardized response object
+ */
+response.text = (content, statusOrOptions = 200, headers = {}) => {
+    const res = _parseResArgs(String(content), statusOrOptions, headers, "text/plain; charset=utf-8");
+    return { _isResponse: true, ...res };
 };
 
-response.html = (content, options = {}) => {
-    return {
-        _isResponse: true,
-        status: options.status || 200,
-        headers: { "Content-Type": "text/html; charset=utf-8", ...(options.headers || {}) },
-        body: content
-    };
+/**
+ * Returns an HTML response.
+ * @param {string} content - The HTML string
+ * @param {number|object} [statusOrOptions=200] - Status code or { status, headers }
+ * @param {object} [headers={}] - Additional headers (if status is number)
+ * @returns {object} Standardized response object
+ */
+response.html = (content, statusOrOptions = 200, headers = {}) => {
+    const res = _parseResArgs(content, statusOrOptions, headers, "text/html; charset=utf-8");
+    return { _isResponse: true, ...res };
 };
 
-response.json = (content, options = {}) => {
+/**
+ * Returns a JSON response.
+ * @param {any} content - Data to be stringified
+ * @param {number|object} [statusOrOptions=200] - Status code or { status, headers }
+ * @param {object} [headers={}] - Additional headers (if status is number)
+ * @returns {object} Standardized response object
+ * 
+ * @example
+ * return response.json({ message: "Success" }, 200, { "X-Custom": "Value" });
+ */
+response.json = (content, statusOrOptions = 200, headers = {}) => {
+    const res = _parseResArgs(content, statusOrOptions, headers, "application/json");
     return {
         _isResponse: true,
-        status: options.status || 200,
-        headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+        status: res.status,
+        headers: res.headers,
         body: JSON.stringify(content)
     };
 };
 
-response.redirect = (url, status = 302) => {
+/**
+ * Returns a redirect response.
+ * @param {string} url - Destination URL
+ * @param {number|object} [statusOrOptions=302] - Status code or { status, headers }
+ * @param {object} [headers={}] - Additional headers
+ * @returns {object} Standardized response object
+ */
+response.redirect = (url, statusOrOptions = 302, headers = {}) => {
+    const res = _parseResArgs("", statusOrOptions, headers);
+    res.headers["Location"] = url;
+    // Default redirect status if not provided or provided as object without status
+    if (typeof statusOrOptions !== 'number' && (!statusOrOptions || !statusOrOptions.status)) {
+        res.status = 302;
+    }
+    return { _isResponse: true, ...res };
+};
+
+/**
+ * Returns an empty response (usually 204 No Content).
+ * @param {number|object} [statusOrOptions=204] - Status code or { status, headers }
+ * @param {object} [headers={}] - Additional headers
+ * @returns {object} Standardized response object
+ */
+response.empty = (statusOrOptions = 204, headers = {}) => {
+    const res = _parseResArgs("", statusOrOptions, headers);
+    // Default empty status
+    if (typeof statusOrOptions !== 'number' && (!statusOrOptions || !statusOrOptions.status)) {
+        res.status = 204;
+    }
+    return { _isResponse: true, ...res };
+};
+
+/**
+ * Returns a binary response.
+ * @param {Uint8Array|string} bytes - Binary data
+ * @param {string|object} [typeOrOptions="application/octet-stream"] - MIME type or { status, headers, type }
+ * @param {object} [headers={}] - Additional headers
+ * @returns {object} Standardized response object
+ */
+response.binary = (bytes, typeOrOptions = "application/octet-stream", headers = {}) => {
+    let status = 200;
+    let finalHeaders = {};
+    let type = "application/octet-stream";
+
+    if (typeOrOptions && typeof typeOrOptions === 'object') {
+        status = typeOrOptions.status || 200;
+        finalHeaders = { ...(typeOrOptions.headers || {}) };
+        type = typeOrOptions.type || typeOrOptions.contentType || "application/octet-stream";
+    } else {
+        type = typeof typeOrOptions === 'string' ? typeOrOptions : "application/octet-stream";
+        finalHeaders = { ...(headers || {}) };
+    }
+
+    if (!finalHeaders["Content-Type"]) {
+        finalHeaders["Content-Type"] = type;
+    }
+
     return {
         _isResponse: true,
         status: status,
-        headers: { "Location": url },
-        body: ""
-    };
-};
-
-response.empty = (status = 204) => {
-    return {
-        _isResponse: true,
-        status: status,
-        headers: {},
-        body: ""
-    };
-};
-
-response.binary = (bytes, options = {}) => {
-    return {
-        _isResponse: true,
-        status: options.status || 200,
-        headers: {
-            "Content-Type": options.type || "application/octet-stream",
-            ...options.headers
-        },
+        headers: finalHeaders,
         body: bytes,
         _isBinary: true
     };
@@ -537,10 +661,15 @@ const os = {
         try {
             const result = natives.os_info();
             const info = typeof result === 'string' ? JSON.parse(result) : result;
-            return info.tempDir || '/tmp';
+            return info.tempDir || info.tmpdir || '/tmp';
         } catch (e) {
             return '/tmp';
         }
+    },
+    info: () => {
+        if (!natives.os_info) return {};
+        const result = natives.os_info();
+        return typeof result === 'string' ? JSON.parse(result) : result;
     }
 };
 
@@ -571,6 +700,25 @@ const proc = {
         const info = typeof result === 'string' ? JSON.parse(result) : result;
         return info.uptime;
     },
+    info: () => {
+        if (!natives.proc_info) return {};
+        const result = natives.proc_info();
+        return typeof result === 'string' ? JSON.parse(result) : result;
+    },
+    list: () => {
+        if (!natives.proc_list) return [];
+        const result = natives.proc_list();
+        return typeof result === 'string' ? JSON.parse(result) : result;
+    },
+    run: (cmd, args = []) => {
+        if (!natives.proc_run) return { ok: false, error: 'Not implemented' };
+        const result = natives.proc_run(JSON.stringify({ cmd, args }));
+        return typeof result === 'string' ? JSON.parse(result) : result;
+    },
+    kill: (pid) => {
+        if (!natives.proc_kill) return false;
+        return natives.proc_kill(pid);
+    },
     memory: () => ({})
 };
 
@@ -597,27 +745,68 @@ class TitanURLSearchParams {
             Object.assign(this._params, init);
         }
     }
-    get(key) { return this._params[key] || null; }
+    append(key, value) {
+        if (!this._params[key]) this._params[key] = [];
+        if (!Array.isArray(this._params[key])) this._params[key] = [this._params[key]];
+        this._params[key].push(String(value));
+    }
+    get(key) {
+        const val = this._params[key];
+        return Array.isArray(val) ? val[0] : (val || null);
+    }
+    getAll(key) {
+        const val = this._params[key];
+        if (!val) return [];
+        return Array.isArray(val) ? val : [val];
+    }
     set(key, value) { this._params[key] = String(value); }
     has(key) { return key in this._params; }
     delete(key) { delete this._params[key]; }
+    forEach(callback) {
+        for (const [key, value] of this.entries()) {
+            callback(value, key, this);
+        }
+    }
+    sort() {
+        const sorted = {};
+        const keys = Object.keys(this._params).sort();
+        for (const key of keys) sorted[key] = this._params[key];
+        this._params = sorted;
+    }
     toString() {
         return Object.entries(this._params)
-            .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+            .flatMap(([k, v]) => {
+                const values = Array.isArray(v) ? v : [v];
+                return values.map(val => `${encodeURIComponent(k)}=${encodeURIComponent(val)}`);
+            })
             .join('&');
     }
-    entries() { return Object.entries(this._params); }
+    entries() {
+        const result = [];
+        for (const [k, v] of Object.entries(this._params)) {
+            const values = Array.isArray(v) ? v : [v];
+            for (const val of values) result.push([k, val]);
+        }
+        return result;
+    }
     keys() { return Object.keys(this._params); }
-    values() { return Object.values(this._params); }
+    values() { 
+        const result = [];
+        for (const v of Object.values(this._params)) {
+            if (Array.isArray(v)) result.push(...v);
+            else result.push(v);
+        }
+        return result;
+    }
 }
 
 const url = {
     parse: (str) => {
         if (typeof URL !== 'undefined') {
-            return new URL(str);
+            try { return new URL(str); } catch { return null; }
         }
-        const match = str.match(/^(https?:)\/\/([^/:]+)(?::(\d+))?(\/[^?#]*)?(\?[^#]*)?(#.*)?$/);
-        if (!match) throw new Error('Invalid URL');
+        const match = str.match(/^(https?:)\/\/([^\/:]+)(?::(\d+))?(\/[^?#]*)?(\?[^#]*)?(#.*)?$/);
+        if (!match) return null;
         return {
             protocol: match[1],
             hostname: match[2],
@@ -676,3 +865,25 @@ t["@titanpl/core"] = core;
 if (!t.exts) t.exts = {};
 t.exts["titan-core"] = core;
 t.exts["@titanpl/core"] = core;
+
+/**
+ * ESM Exports for testing and standard imports
+ */
+export {
+    fs,
+    path,
+    crypto,
+    os,
+    net,
+    proc,
+    time,
+    url,
+    buffer,
+    ls,
+    session,
+    cookies,
+    response,
+    core
+};
+
+export default core;

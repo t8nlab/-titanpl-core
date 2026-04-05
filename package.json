@@ -1,6 +1,6 @@
 {
     "name": "@titanpl/core",
-    "version": "3.0.4",
+    "version": "3.0.5",
     "description": "The official Core Standard Library for Titan Planet - provides fs, path, crypto, os, net, proc, time, and url modules",
     "main": "index.js",
     "type": "module",
@@ -38,12 +38,9 @@
         "native/target/release/*.dylib",
         "README.md"
     ],
-    "engines": {
-        "node": ">=18.0.0",
-        "@ezetgalaxy/titan": ">=26.10.2"
-    },
     "devDependencies": {
-        "esbuild": "^0.27.2"
+        "esbuild": "^0.27.2",
+        "vitest": "^4.0.17"
     },
     "dependencies": {
         "@titanpl/valid": "^1.1.1"

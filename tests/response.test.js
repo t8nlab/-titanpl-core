@@ -91,7 +91,7 @@ describe('response', () => {
             const res = response.html(html);
             
             expect(res._isResponse).toBe(true);
-            expect(res.headers['Content-Type']).toBe('text/html');
+            expect(res.headers['Content-Type']).toBe('text/html; charset=utf-8');
             expect(res.body).toBe(html);
         });
 
@@ -100,7 +100,7 @@ describe('response', () => {
                 headers: { 'X-Frame-Options': 'DENY' }
             });
             
-            expect(res.headers['Content-Type']).toBe('text/html');
+            expect(res.headers['Content-Type']).toBe('text/html; charset=utf-8');
             expect(res.headers['X-Frame-Options']).toBe('DENY');
         });
     });
@@ -129,7 +129,7 @@ describe('response', () => {
     });
 
     describe('response.empty()', () => {
-        it.skip('should create empty 204 response by default', () => {
+        it('should create empty 204 response by default', () => {
             const res = response.empty();
             
             expect(res._isResponse).toBe(true);
@@ -137,10 +137,63 @@ describe('response', () => {
             expect(res.body).toBe('');
         });
 
-        it.skip('should allow custom status', () => {
+        it('should allow custom status', () => {
             const res = response.empty(202);
             
             expect(res.status).toBe(202);
+        });
+
+        it('should allow positional status and headers', () => {
+            const res = response.empty(201, { 'X-Empty': 'true' });
+            expect(res.status).toBe(201);
+            expect(res.headers['X-Empty']).toBe('true');
+        });
+    });
+
+    describe('Positional Signatures (New)', () => {
+        it('response(body, status, headers)', () => {
+            const res = response('Hello', 201, { 'X-Test': 'Value' });
+            expect(res.status).toBe(201);
+            expect(res.body).toBe('Hello');
+            expect(res.headers['X-Test']).toBe('Value');
+        });
+
+        it('response.json(data, status, headers)', () => {
+            const res = response.json({ ok: true }, 201, { 'X-JSON': 'True' });
+            expect(res.status).toBe(201);
+            expect(JSON.parse(res.body)).toEqual({ ok: true });
+            expect(res.headers['X-JSON']).toBe('True');
+            expect(res.headers['Content-Type']).toBe('application/json');
+        });
+
+        it('response.html(content, status, headers)', () => {
+            const res = response.html('<h1>Hi</h1>', 200, { 'X-HTML': 'True' });
+            expect(res.headers['Content-Type']).toBe('text/html; charset=utf-8');
+            expect(res.headers['X-HTML']).toBe('True');
+        });
+
+        it('response.redirect(url, status, headers)', () => {
+            const res = response.redirect('/login', 301, { 'X-Redirect': 'True' });
+            expect(res.status).toBe(301);
+            expect(res.headers['Location']).toBe('/login');
+            expect(res.headers['X-Redirect']).toBe('True');
+        });
+
+        it('response.binary(bytes, type, headers)', () => {
+            const bytes = new Uint8Array([1, 2, 3]);
+            const res = response.binary(bytes, 'application/pdf', { 'X-Binary': 'True' });
+            expect(res.body).toBe(bytes);
+            expect(res.headers['Content-Type']).toBe('application/pdf');
+            expect(res.headers['X-Binary']).toBe('True');
+            expect(res._isBinary).toBe(true);
+        });
+
+        it('should not mutate user-provided headers', () => {
+            const myHeaders = { 'X-Existing': 'True' };
+            const res = response.json({ test: 1 }, 200, myHeaders);
+            
+            expect(res.headers['Content-Type']).toBe('application/json');
+            expect(myHeaders['Content-Type']).toBeUndefined(); // Should not have mutated
         });
     });
 });
