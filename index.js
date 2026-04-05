@@ -386,7 +386,7 @@ const session = {
         return natives.session_get(sessionId, key);
     },
     set: (sessionId, key, value) => {
-        natives.session_set(sessionId, JSON.stringify({ key, value: String(value) }));
+        natives.session_set(sessionId, key, String(value));
     },
     delete: (sessionId, key) => {
         natives.session_delete(sessionId, key);
@@ -414,7 +414,7 @@ const cookies = {
     },
     /** Sets Set-Cookie header on response */
     set: (res, name, value, options = {}) => {
-        if (!res) return;
+        if (!res || !res.setHeader) return;
         let cookie = `${name}=${encodeURIComponent(value)}`;
         if (options.maxAge) cookie += `; Max-Age=${options.maxAge}`;
         if (options.path) cookie += `; Path=${options.path}`;
@@ -422,27 +422,16 @@ const cookies = {
         if (options.secure) cookie += `; Secure`;
         if (options.sameSite) cookie += `; SameSite=${options.sameSite}`;
 
-        const getHeader = (n) => {
-            if (res.getHeader) return res.getHeader(n);
-            return res.headers ? res.headers[n] : null;
-        };
-
-        const setHeader = (n, v) => {
-            if (res.setHeader) return res.setHeader(n, v);
-            if (!res.headers) res.headers = {};
-            res.headers[n] = v;
-        };
-
-        let prev = getHeader('Set-Cookie');
+        let prev = res.getHeader ? res.getHeader('Set-Cookie') : null;
         if (prev) {
             if (Array.isArray(prev)) {
                 prev.push(cookie);
-                setHeader('Set-Cookie', prev);
+                res.setHeader('Set-Cookie', prev);
             } else {
-                setHeader('Set-Cookie', [prev, cookie]);
+                res.setHeader('Set-Cookie', [prev, cookie]);
             }
         } else {
-            setHeader('Set-Cookie', cookie);
+            res.setHeader('Set-Cookie', cookie);
         }
     },
     /** Deletes cookie by setting maxAge=0 */
@@ -460,17 +449,6 @@ const cookies = {
  * This module provides functions to create standardized response objects
  * for the Titan runtime. All methods support both positional and object-based
  * argument signatures.
- * 
- * @example
- * // Standard usage (object-based)
- * return response({
- *   status: 200,
- *   headers: { "X-Powered-By": "Titan" },
- *   body: "Hello World"
- * });
- * 
- * // Helper usage (positional)
- * return response.json({ ok: true }, 201, { "Access-Control-Allow-Origin": "*" });
  */
 const response = (optionsOrBody, status = 200, headers = {}) => {
     // Determine if first arg is an options object
@@ -522,10 +500,6 @@ function _parseResArgs(content, statusOrOptions, headers, defaultType) {
 
 /**
  * Returns a plain text response.
- * @param {string} content - The text body
- * @param {number|object} [statusOrOptions=200] - Status code or { status, headers }
- * @param {object} [headers={}] - Additional headers (if status is number)
- * @returns {object} Standardized response object
  */
 response.text = (content, statusOrOptions = 200, headers = {}) => {
     const res = _parseResArgs(String(content), statusOrOptions, headers, "text/plain; charset=utf-8");
@@ -534,10 +508,6 @@ response.text = (content, statusOrOptions = 200, headers = {}) => {
 
 /**
  * Returns an HTML response.
- * @param {string} content - The HTML string
- * @param {number|object} [statusOrOptions=200] - Status code or { status, headers }
- * @param {object} [headers={}] - Additional headers (if status is number)
- * @returns {object} Standardized response object
  */
 response.html = (content, statusOrOptions = 200, headers = {}) => {
     const res = _parseResArgs(content, statusOrOptions, headers, "text/html; charset=utf-8");
@@ -546,13 +516,6 @@ response.html = (content, statusOrOptions = 200, headers = {}) => {
 
 /**
  * Returns a JSON response.
- * @param {any} content - Data to be stringified
- * @param {number|object} [statusOrOptions=200] - Status code or { status, headers }
- * @param {object} [headers={}] - Additional headers (if status is number)
- * @returns {object} Standardized response object
- * 
- * @example
- * return response.json({ message: "Success" }, 200, { "X-Custom": "Value" });
  */
 response.json = (content, statusOrOptions = 200, headers = {}) => {
     const res = _parseResArgs(content, statusOrOptions, headers, "application/json");
@@ -566,10 +529,6 @@ response.json = (content, statusOrOptions = 200, headers = {}) => {
 
 /**
  * Returns a redirect response.
- * @param {string} url - Destination URL
- * @param {number|object} [statusOrOptions=302] - Status code or { status, headers }
- * @param {object} [headers={}] - Additional headers
- * @returns {object} Standardized response object
  */
 response.redirect = (url, statusOrOptions = 302, headers = {}) => {
     const res = _parseResArgs("", statusOrOptions, headers);
@@ -583,9 +542,6 @@ response.redirect = (url, statusOrOptions = 302, headers = {}) => {
 
 /**
  * Returns an empty response (usually 204 No Content).
- * @param {number|object} [statusOrOptions=204] - Status code or { status, headers }
- * @param {object} [headers={}] - Additional headers
- * @returns {object} Standardized response object
  */
 response.empty = (statusOrOptions = 204, headers = {}) => {
     const res = _parseResArgs("", statusOrOptions, headers);
@@ -598,10 +554,6 @@ response.empty = (statusOrOptions = 204, headers = {}) => {
 
 /**
  * Returns a binary response.
- * @param {Uint8Array|string} bytes - Binary data
- * @param {string|object} [typeOrOptions="application/octet-stream"] - MIME type or { status, headers, type }
- * @param {object} [headers={}] - Additional headers
- * @returns {object} Standardized response object
  */
 response.binary = (bytes, typeOrOptions = "application/octet-stream", headers = {}) => {
     let status = 200;
@@ -629,6 +581,7 @@ response.binary = (bytes, typeOrOptions = "application/octet-stream", headers = 
         _isBinary: true
     };
 };
+
 
 // --- OS ---
 const os = {
@@ -661,15 +614,10 @@ const os = {
         try {
             const result = natives.os_info();
             const info = typeof result === 'string' ? JSON.parse(result) : result;
-            return info.tempDir || info.tmpdir || '/tmp';
+            return info.tempDir || '/tmp';
         } catch (e) {
             return '/tmp';
         }
-    },
-    info: () => {
-        if (!natives.os_info) return {};
-        const result = natives.os_info();
-        return typeof result === 'string' ? JSON.parse(result) : result;
     }
 };
 
@@ -699,25 +647,6 @@ const proc = {
         if (!result) return 0;
         const info = typeof result === 'string' ? JSON.parse(result) : result;
         return info.uptime;
-    },
-    info: () => {
-        if (!natives.proc_info) return {};
-        const result = natives.proc_info();
-        return typeof result === 'string' ? JSON.parse(result) : result;
-    },
-    list: () => {
-        if (!natives.proc_list) return [];
-        const result = natives.proc_list();
-        return typeof result === 'string' ? JSON.parse(result) : result;
-    },
-    run: (cmd, args = []) => {
-        if (!natives.proc_run) return { ok: false, error: 'Not implemented' };
-        const result = natives.proc_run(JSON.stringify({ cmd, args }));
-        return typeof result === 'string' ? JSON.parse(result) : result;
-    },
-    kill: (pid) => {
-        if (!natives.proc_kill) return false;
-        return natives.proc_kill(pid);
     },
     memory: () => ({})
 };

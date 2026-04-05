@@ -1,6 +1,6 @@
 {
     "name": "@titanpl/core",
-    "version": "3.0.5",
+    "version": "3.0.6",
     "description": "The official Core Standard Library for Titan Planet - provides fs, path, crypto, os, net, proc, time, and url modules",
     "main": "index.js",
     "type": "module",
