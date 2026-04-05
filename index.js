@@ -648,6 +648,25 @@ const proc = {
         const info = typeof result === 'string' ? JSON.parse(result) : result;
         return info.uptime;
     },
+    info: () => {
+        if (!natives.proc_info) return {};
+        const result = natives.proc_info();
+        return typeof result === 'string' ? JSON.parse(result) : result;
+    },
+    list: () => {
+        if (!natives.proc_list) return [];
+        const result = natives.proc_list();
+        return typeof result === 'string' ? JSON.parse(result) : result;
+    },
+    run: (cmd, args = []) => {
+        if (!natives.proc_run) return { ok: false, error: 'Not implemented' };
+        const result = natives.proc_run(JSON.stringify({ cmd, args }));
+        return typeof result === 'string' ? JSON.parse(result) : result;
+    },
+    kill: (pid) => {
+        if (!natives.proc_kill) return false;
+        return natives.proc_kill(pid);
+    },
     memory: () => ({})
 };
 
